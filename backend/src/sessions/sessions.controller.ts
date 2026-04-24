@@ -24,7 +24,7 @@ export class SessionsController {
         botDisplayName: session.botDisplayName,
       },
       {
-        attempts: 3,         // 1 initial + 2 retries as required
+        attempts: 2,         // 1 initial + 1 retry
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: 100,
         removeOnFail: 50,

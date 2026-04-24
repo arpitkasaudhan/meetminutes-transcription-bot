@@ -19,15 +19,17 @@
 
 import { chromium, Browser, Page } from 'playwright';
 import { io, Socket } from 'socket.io-client';
+import * as os from 'os';
+import * as path from 'path';
 
 const SESSION_ID = process.env.SESSION_ID!;
 const MEET_URL = process.env.MEET_URL!;
 const BOT_DISPLAY_NAME = process.env.BOT_DISPLAY_NAME || 'MeetMinutes Bot';
 const BACKEND_WS_URL = process.env.BACKEND_WS_URL || 'http://localhost:3000';
-const CHUNK_MS = 5000; // 5-second audio chunks
+const CHUNK_MS = 5000;
 
 if (!SESSION_ID || !MEET_URL) {
-  console.error('SESSION_ID and MEET_URL env vars are required');
+  console.error('[Bot] SESSION_ID and MEET_URL env vars are required');
   process.exit(1);
 }
 
@@ -35,17 +37,8 @@ async function connectSocket(): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket = io(BACKEND_WS_URL, { transports: ['websocket'] });
     const timer = setTimeout(() => reject(new Error('Socket connection timeout')), 15000);
-
-    socket.on('connect', () => {
-      clearTimeout(timer);
-      console.log(`[Bot] Socket connected: ${socket.id}`);
-      resolve(socket);
-    });
-
-    socket.on('connect_error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
+    socket.on('connect', () => { clearTimeout(timer); resolve(socket); });
+    socket.on('connect_error', (err) => { clearTimeout(timer); reject(err); });
   });
 }
 
@@ -53,133 +46,157 @@ async function joinMeet(page: Page, displayName: string): Promise<void> {
   console.log(`[Bot] Navigating to ${MEET_URL}`);
   await page.goto(MEET_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
-  // --- Pre-join screen ---
+  // Wait for pre-join screen to load — poll until the name input OR join button appears
+  // Do NOT do a long fixed wait; act as soon as the page is interactive.
+  console.log('[Bot] Waiting for pre-join screen...');
 
-  // Dismiss cookie / sign-in prompts
-  for (const selector of [
-    'button[aria-label="Accept all"]',
-    'button:has-text("Accept all")',
-    'button:has-text("Got it")',
-  ]) {
-    const btn = await page.$(selector).catch(() => null);
-    if (btn) { await btn.click().catch(() => {}); await page.waitForTimeout(500); }
-  }
+  let nameEntered = false;
 
-  // Enter bot display name
-  const nameSelectors = [
-    'input[aria-label*="name" i]',
-    'input[placeholder*="name" i]',
-    'input[data-initial-value]',
-    'input[type="text"]',
-  ];
-  for (const sel of nameSelectors) {
-    const input = await page.$(sel).catch(() => null);
-    if (input) {
-      await input.click({ clickCount: 3 });
-      await input.fill(displayName);
-      console.log(`[Bot] Entered display name via: ${sel}`);
-      break;
+  // Try for up to 20 seconds in a tight loop
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(500);
+
+    // Check if already blocked ("You can't join")
+    const blocked = await page.evaluate(() =>
+      document.body.innerText.includes("can't join") ||
+      document.body.innerText.includes("cannot join")
+    );
+    if (blocked) {
+      const debugPath = path.join(os.homedir(), 'Desktop', 'bot-prejoin-debug.png');
+      try { await page.screenshot({ path: debugPath, fullPage: true }); } catch {}
+      throw new Error('Google Meet blocked the bot: "You can\'t join this video call". The meeting must allow guests — turn off Host Management in the meeting security settings.');
+    }
+
+    // Try to fill name input the moment it appears
+    if (!nameEntered) {
+      for (const sel of [
+        'input[aria-label*="name" i]',
+        'input[placeholder*="name" i]',
+        'input[data-initial-value]',
+        'input[type="text"]',
+      ]) {
+        try {
+          const el = page.locator(sel).first();
+          if (await el.isVisible({ timeout: 300 })) {
+            await el.fill(displayName);
+            nameEntered = true;
+            console.log(`[Bot] Entered display name via ${sel}`);
+            await page.waitForTimeout(500); // small pause so Join button activates
+            break;
+          }
+        } catch {}
+      }
+    }
+
+    // Try to click the join button
+    for (const sel of [
+      '[jsname="Qx7uuf"]',
+      '[jsname="d9TlZc"]',
+      'button:has-text("Ask to join")',
+      'button:has-text("Join now")',
+      'button:has-text("Join")',
+      'button:has-text("Request to join")',
+    ]) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.isVisible({ timeout: 300 })) {
+          await el.click();
+          console.log(`[Bot] Clicked join via: ${sel}`);
+
+          // Wait until inside the meeting (up to 2 min for host to admit)
+          console.log('[Bot] Waiting to be admitted...');
+          await page.waitForSelector(
+            '[data-meeting-title], [jsname="CQylAd"], [aria-label*="Leave call" i]',
+            { timeout: 120_000 },
+          ).catch(() => console.log('[Bot] Admission timeout — proceeding anyway'));
+
+          console.log('[Bot] Successfully joined the meeting');
+          return;
+        }
+      } catch {}
     }
   }
 
-  // Mute microphone (we don't want the bot's fake mic stream leaking)
-  for (const sel of [
-    '[data-priv="cameraButton"]',
-    '[aria-label*="microphone" i]',
-    '[aria-label*="Turn off mic" i]',
-  ]) {
-    const btn = await page.$(sel).catch(() => null);
-    if (btn) { await btn.click().catch(() => {}); }
-  }
-
-  // Click "Ask to join" / "Join now"
-  const joinSelectors = [
-    'button[data-id="join-button"]',
-    '[jsname="Qx7uuf"]',
-    '[jsname="d9TlZc"]',
-    'button:has-text("Ask to join")',
-    'button:has-text("Join now")',
-    'button:has-text("Join")',
-  ];
-
-  let joined = false;
-  for (const sel of joinSelectors) {
-    try {
-      await page.waitForSelector(sel, { timeout: 5000 });
-      await page.click(sel);
-      joined = true;
-      console.log(`[Bot] Clicked join via: ${sel}`);
-      break;
-    } catch {}
-  }
-
-  if (!joined) throw new Error('Could not find join button — check Meet URL or pre-join selectors');
-
-  // Wait until we are actually inside the meeting
-  await page.waitForSelector(
-    '[data-meeting-title], [aria-label*="Leave call" i], [jsname="CQylAd"]',
-    { timeout: 60_000 },
-  );
-  console.log('[Bot] Successfully joined the meeting');
+  // If we get here, take a debug screenshot and throw
+  const debugPath = path.join(os.homedir(), 'Desktop', 'bot-prejoin-debug.png');
+  try { await page.screenshot({ path: debugPath, fullPage: true }); console.log(`[Bot] Debug screenshot saved: ${debugPath}`); } catch {}
+  throw new Error('Timed out waiting for join button on pre-join screen');
 }
 
 async function startAudioCapture(page: Page, socket: Socket): Promise<void> {
-  // Expose a Node.js callback that the browser JS can call with each chunk
   await page.exposeFunction('__sendAudioChunk__', (base64: string) => {
     socket.emit('audio-chunk', { sessionId: SESSION_ID, chunk: base64 });
   });
 
   await page.evaluate((chunkMs: number) => {
-    const ctx = new AudioContext({ sampleRate: 16000 });
-    const dest = ctx.createMediaStreamDestination();
-
-    function connectElement(el: HTMLAudioElement) {
-      if ((el as any).__botCaptured__) return;
-      (el as any).__botCaptured__ = true;
-      try {
-        const src = ctx.createMediaElementSource(el);
-        src.connect(dest);
-        src.connect(ctx.destination); // keep audio playing for the bot
-      } catch (_) {}
+    async function captureOneChunk(stream: MediaStream): Promise<void> {
+      return new Promise((resolve) => {
+        const blobs: Blob[] = [];
+        const rec = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus',
+          audioBitsPerSecond: 16000,
+        });
+        rec.ondataavailable = (e: BlobEvent) => { if (e.data?.size > 0) blobs.push(e.data); };
+        rec.onstop = async () => {
+          const blob = new Blob(blobs, { type: 'audio/webm;codecs=opus' });
+          if (blob.size > 500) {
+            const buf = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let bin = '';
+            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            (window as any).__sendAudioChunk__(btoa(bin));
+            console.log(`[BotInPage] Sent ${blob.size}B chunk`);
+          }
+          resolve();
+        };
+        rec.start();
+        setTimeout(() => rec.stop(), chunkMs);
+      });
     }
 
-    // Connect all existing <audio> elements
-    document.querySelectorAll<HTMLAudioElement>('audio').forEach(connectElement);
+    (async () => {
+      try {
+        // Strategy 1: getDisplayMedia — captures all audio playing in Chrome tab
+        // Works because --auto-select-desktop-capture-source bypasses the picker
+        const stream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: { width: 1, height: 1 },
+          audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 16000 },
+        });
+        // Drop the video track, we only need audio
+        stream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
+        console.log('[BotInPage] getDisplayMedia stream acquired');
 
-    // Watch for new participants
-    new MutationObserver(() => {
-      document.querySelectorAll<HTMLAudioElement>('audio').forEach(connectElement);
-    }).observe(document.body, { childList: true, subtree: true });
-
-    const recorder = new MediaRecorder(dest.stream, {
-      mimeType: 'audio/webm;codecs=opus',
-      audioBitsPerSecond: 16000,
-    });
-
-    recorder.ondataavailable = async (e: BlobEvent) => {
-      if (!e.data || e.data.size < 200) return; // skip silence/tiny chunks
-      const buf = await e.data.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const b64 = btoa(binary);
-      (window as any).__sendAudioChunk__(b64);
-    };
-
-    recorder.start(chunkMs);
-    console.log(`[BotInPage] MediaRecorder started, chunk interval: ${chunkMs}ms`);
+        while (true) await captureOneChunk(stream);
+      } catch (e1) {
+        console.log('[BotInPage] getDisplayMedia failed, trying getUserMedia:', (e1 as Error).message);
+        try {
+          // Strategy 2: getUserMedia — captures the microphone (fake sine wave in test mode)
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 16000 },
+          });
+          console.log('[BotInPage] getUserMedia stream acquired');
+          while (true) await captureOneChunk(stream);
+        } catch (e2) {
+          console.error('[BotInPage] All audio capture strategies failed:', (e2 as Error).message);
+        }
+      }
+    })();
   }, CHUNK_MS);
 
   console.log('[Bot] Audio capture injected');
 }
 
 async function waitForMeetingEnd(page: Page): Promise<void> {
-  // Poll until the meeting ends (leave button disappears, or the page redirects)
+  // Wait at least 60 seconds before even checking for meeting end,
+  // so we don't exit immediately on a false-positive selector match.
+  await page.waitForTimeout(60_000).catch(() => {});
+
   await page.waitForSelector(
-    '[data-meeting-ended="true"], [aria-label*="You\'ve left" i], [jsname="r8qRAd"]',
-    { timeout: 7_200_000 }, // 2-hour max
+    '[data-meeting-ended="true"]',
+    { timeout: 7_200_000 },
   ).catch(() => {
-    console.log('[Bot] Meeting end selector not found; assuming ended by timeout');
+    console.log('[Bot] Meeting end not detected; shutting down after timeout');
   });
 }
 
@@ -189,30 +206,34 @@ async function main() {
 
   try {
     socket = await connectSocket();
+    console.log('[Bot] Socket connected');
     socket.emit('bot-status', { sessionId: SESSION_ID, status: 'JOINING' });
 
     browser = await chromium.launch({
-      headless: false,  // headed + Xvfb (see README for why)
+      headless: false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
         '--disable-infobars',
+        '--disable-blink-features=AutomationControlled',
         '--autoplay-policy=no-user-gesture-required',
-        // Grant microphone/camera without a real device; audio capture is
-        // done via createMediaElementSource so fake devices are fine.
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
-        '--allow-running-insecure-content',
+        '--auto-select-desktop-capture-source=Entire screen',
+        '--enable-usermedia-screen-capturing',
       ],
     });
 
     const context = await browser.newContext({
       permissions: ['camera', 'microphone'],
       userAgent:
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    });
+
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
     const page = await context.newPage();
@@ -226,7 +247,7 @@ async function main() {
     await waitForMeetingEnd(page);
 
     socket.emit('bot-status', { sessionId: SESSION_ID, status: 'DONE' });
-    console.log('[Bot] Meeting ended, shutting down');
+    console.log('[Bot] Done');
     process.exit(0);
   } catch (err) {
     console.error('[Bot] Fatal error:', err);
