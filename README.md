@@ -220,3 +220,4 @@ Sessions are stored in-memory (`Map<string, Session>`) for simplicity. In produc
 - **Admission by host**: When a non-authenticated user uses "Ask to join", a human host must admit them. In a real deployment the bot owner would host the meeting or use a Google Workspace account that auto-admits.
 - **Session persistence**: Sessions live in memory and are lost on restart.
 - **Multiple concurrent meetings**: Supported by the worker's `concurrency: 5` setting, but each instance needs its own Xvfb display number (`:99`, `:100`, etc.). A production implementation would allocate display numbers dynamically.
+
