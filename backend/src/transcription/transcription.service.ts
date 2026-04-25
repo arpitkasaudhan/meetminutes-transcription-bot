@@ -4,15 +4,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-// Whisper hallucinations for silence — filter these out
+// Common Whisper hallucinations on silence/noise — filter these out
 const SILENCE_PHRASES = new Set([
   'thank you.',
   'thanks for watching.',
+  'thanks for watching!',
   'you',
+  'you.',
   '.',
   '',
-  'you.',
   'bye.',
+  'bye!',
+  'beep',
+  'beep beep',
+  'outro music',
+  'music',
+  '[music]',
+  '[silence]',
+  '[blank audio]',
+  'subscribe',
+  'like and subscribe',
 ]);
 
 @Injectable()
@@ -37,16 +48,21 @@ export class TranscriptionService {
 
       const result = await this.groq.audio.transcriptions.create({
         file: fs.createReadStream(tmpFile),
-        model: 'whisper-large-v3-turbo',
+        model: 'whisper-large-v3',        // highest accuracy model on Groq
         response_format: 'json',
         language: 'en',
+        prompt: 'This is a live Google Meet conversation between participants.', // context improves accuracy
       });
 
       const text = result.text?.trim() ?? '';
 
+      // Filter hallucinations and very short noise artifacts
+      if (!text || text.length < 3) return null;
       if (SILENCE_PHRASES.has(text.toLowerCase())) return null;
+      // Filter if it's just punctuation or numbers
+      if (/^[\s.,!?;:\-–—]+$/.test(text)) return null;
 
-      return text || null;
+      return text;
     } catch (err) {
       this.logger.error(`Groq transcription error: ${err.message}`);
       return null;
