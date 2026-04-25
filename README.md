@@ -128,21 +128,19 @@ Returns the current session state.
 
 ### 1. Audio Capture Approach
 
-**Method: `AudioContext.createMediaElementSource()` + `MediaRecorder`**
+**Method: `getUserMedia()` + `MediaRecorder` (stop/restart per chunk)**
 
-After the bot joins the meeting, we inject JavaScript that:
-1. Iterates over all `<audio>` elements Google Meet creates for remote participants.
-2. Connects each to a shared `AudioContext` via `createMediaElementSource()`.
-3. Routes the merged audio to a `MediaStreamDestination`.
-4. Runs `MediaRecorder` on that destination with a 5-second timeslice, encoding as `audio/webm;codecs=opus`.
-5. Each `dataavailable` chunk is base64-encoded and sent to the backend via `window.__sendAudioChunk__()` (exposed from Node.js via `page.exposeFunction`).
-6. A `MutationObserver` watches for new `<audio>` elements as participants join mid-meeting.
+After the bot joins the meeting, we inject JavaScript into the page via `page.exposeFunction` + `page.evaluate` that:
+1. Calls `navigator.mediaDevices.getUserMedia({ audio: true })` with echo cancellation and noise suppression enabled.
+2. Creates a `MediaRecorder` on the resulting stream encoding as `audio/webm;codecs=opus`.
+3. **Stop/restart per chunk** — instead of using `timeslice`, we stop and restart the recorder every 5 seconds so each blob is a complete, self-contained WebM file that Groq Whisper can decode independently.
+4. Each chunk is base64-encoded and sent to the backend via `window.__sendAudioChunk__()` (exposed from Node.js via `page.exposeFunction`).
 
-**Why not `getDisplayMedia`?**  
-`getDisplayMedia` requires a user gesture and cannot be auto-approved without OS-level patches. The `createMediaElementSource` approach works fully in process with no extra permissions.
+**Why `getUserMedia` and not `getDisplayMedia`?**  
+`getDisplayMedia` captures all system audio indiscriminately — background music, YouTube tabs, OS notifications — causing Whisper to hallucinate on noise. `getUserMedia` targets the microphone directly, giving clean, speech-only audio.
 
-**Why not OS-level capture (PulseAudio loopback)?**  
-That would require tight coupling between the Node.js process and the audio subsystem. The in-page MediaRecorder approach is self-contained and portable.
+**Why stop/restart instead of `timeslice`?**  
+`MediaRecorder` with a timeslice emits continuation chunks that lack the WebM EBML header. Only the first chunk is a valid standalone file. Stopping and restarting creates a fresh, complete WebM file every 5 seconds that any decoder (including Whisper) can process independently.
 
 ### 2. Headed Mode with Xvfb
 
@@ -158,8 +156,9 @@ Xvfb gives us a real display at zero cost inside Docker, making the browser beha
 ### 3. Transcription Service — Groq Whisper
 
 Chosen because:
-- Free tier is generous (fastest inference available for Whisper).
-- `whisper-large-v3-turbo` gives an excellent accuracy/latency tradeoff for 5-second audio windows.
+- Free tier is generous (fastest Whisper inference available anywhere).
+- `whisper-large-v3` — the highest accuracy Whisper model — gives excellent results on 5-second audio windows.
+- A meeting context prompt (`"This is a live Google Meet conversation between participants"`) is passed with every request to help Whisper recognise conversational speech patterns.
 - Simple REST API; no streaming WebSocket required on the Groq side.
 
 ### 4. Job Queue — BullMQ + Redis
@@ -201,7 +200,7 @@ Sessions are stored in-memory (`Map<string, Session>`) for simplicity. In produc
   - [x] Opens Google Meet link in Chromium
   - [x] Handles pre-join screen (name input, popups)
   - [x] Clicks "Ask to join" / "Join now"
-  - [x] Captures tab audio via `createMediaElementSource` + `MediaRecorder`
+  - [x] Captures audio via `getUserMedia` + `MediaRecorder` (stop/restart per chunk)
   - [x] Streams base64 WebM/Opus chunks every 5 s via Socket.IO (real-time)
   - [x] Headed mode with Xvfb in Docker
 - [x] **Part 3 — Frontend (React + TypeScript)**
@@ -214,10 +213,10 @@ Sessions are stored in-memory (`Map<string, Session>`) for simplicity. In produc
   - [x] `docker-compose.yml` — `docker compose up --build` starts everything
   - [x] `.env.example` with all required variables
 
-## Known Limitations / What Was Skipped
+## Known Limitations
 
-- **Google account authentication**: Google Meet may require participants to be signed in to a Google account. The bot currently runs without authentication. For a production system, you would pass a Google session cookie or use a service account.
-- **Admission by host**: When a non-authenticated user uses "Ask to join", a human host must admit them. In a real deployment the bot owner would host the meeting or use a Google Workspace account that auto-admits.
-- **Session persistence**: Sessions live in memory and are lost on restart.
-- **Multiple concurrent meetings**: Supported by the worker's `concurrency: 5` setting, but each instance needs its own Xvfb display number (`:99`, `:100`, etc.). A production implementation would allocate display numbers dynamically.
+- **Google account authentication**: Google Meet requires meetings to have "Quick Access" enabled for unauthenticated browsers. In production, the bot would use a dedicated Google service account to join without host approval.
+- **Admission by host**: With Quick Access off, the host must click "Admit" when the bot knocks. With Quick Access on, the bot joins directly.
+- **Session persistence**: Sessions live in-memory and are lost on restart. Production would use Redis or a database.
+- **Multiple concurrent meetings**: The worker runs at `concurrency: 5`. In Docker, each bot instance shares one Xvfb display; a production setup would allocate display numbers dynamically per worker.
 
