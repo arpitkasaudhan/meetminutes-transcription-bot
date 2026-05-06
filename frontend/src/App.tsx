@@ -4,6 +4,7 @@ import { Session, SessionStatus, TranscriptChunk } from './types';
 import SubmitForm from './components/SubmitForm';
 import SessionView from './components/SessionView';
 import LiveTranscript from './components/LiveTranscript';
+import './styles.css';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3000';
 
@@ -14,7 +15,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
-  // Single socket connection, reused across sessions
   useEffect(() => {
     const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
@@ -27,15 +27,14 @@ export default function App() {
       setTranscript((prev) => [...prev, data]);
     });
 
-    return () => {
-      socket.disconnect();
-    };
+    return () => { socket.disconnect(); };
   }, []);
 
   const handleSubmit = async (meetUrl: string, botDisplayName: string) => {
     setError(null);
     setSubmitting(true);
     setTranscript([]);
+    setSession(null);
 
     try {
       const res = await fetch(`${BACKEND_URL}/sessions`, {
@@ -51,83 +50,115 @@ export default function App() {
 
       const newSession: Session = await res.json();
       setSession(newSession);
-
-      // Subscribe to this session's room for live updates
       socketRef.current?.emit('join-session', newSession.id);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleNewSession = () => {
+    setSession(null);
+    setTranscript([]);
+    setError(null);
+  };
+
   const isActive = session && session.status !== 'DONE' && session.status !== 'FAILED';
 
   return (
-    <div style={styles.root}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>MeetMinutes</h1>
-        <p style={styles.subtitle}>Real-time Google Meet transcription bot</p>
+    <div className="app">
+      {/* Header */}
+      <header className="header">
+        <div className="header-inner">
+          <div className="logo">
+            <div className="logo-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" fill="currentColor"/>
+              </svg>
+            </div>
+            <span className="logo-text">MeetMinutes</span>
+          </div>
+          <div className="header-badge">AI Powered</div>
+        </div>
       </header>
 
-      <main style={styles.main}>
-        <SubmitForm onSubmit={handleSubmit} loading={submitting} disabled={!!isActive} />
+      {/* Hero */}
+      <section className="hero">
+        <h1 className="hero-title">
+          Live Meeting <span className="gradient-text">Transcription</span>
+        </h1>
+        <p className="hero-sub">
+          Drop a Google Meet link. Our bot joins, listens, and streams the transcript to you in real time.
+        </p>
+      </section>
 
-        {error && <div style={styles.error}>{error}</div>}
+      {/* Main Content */}
+      <main className="main">
+        {error && (
+          <div className="error-banner">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            {error}
+          </div>
+        )}
+
+        <SubmitForm
+          onSubmit={handleSubmit}
+          loading={submitting}
+          disabled={!!isActive}
+        />
 
         {session && (
           <>
-            <SessionView session={session} />
+            <SessionView
+              session={session}
+              onNewSession={handleNewSession}
+            />
             <LiveTranscript
-            chunks={transcript}
-            sessionId={session.id}
-            sessionDone={session.status === 'DONE'}
-          />
+              chunks={transcript}
+              sessionId={session.id}
+              sessionDone={session.status === 'DONE'}
+            />
           </>
         )}
+
+        {!session && !submitting && (
+          <div className="how-it-works">
+            <h3 className="how-title">How it works</h3>
+            <div className="steps">
+              <div className="step">
+                <div className="step-num">1</div>
+                <div>
+                  <div className="step-label">Paste your Meet link</div>
+                  <div className="step-desc">Any active Google Meet URL</div>
+                </div>
+              </div>
+              <div className="step-arrow">→</div>
+              <div className="step">
+                <div className="step-num">2</div>
+                <div>
+                  <div className="step-label">Bot joins automatically</div>
+                  <div className="step-desc">Admit it from your Meet</div>
+                </div>
+              </div>
+              <div className="step-arrow">→</div>
+              <div className="step">
+                <div className="step-num">3</div>
+                <div>
+                  <div className="step-label">Read live transcript</div>
+                  <div className="step-desc">Words appear as you speak</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+
+      <footer className="footer">
+        Built with NestJS · Playwright · Groq Whisper · React
+      </footer>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    fontFamily: "'Segoe UI', system-ui, sans-serif",
-    background: '#0f0f0f',
-    color: '#e8e8e8',
-    minHeight: '100vh',
-    margin: 0,
-    padding: 0,
-  },
-  header: {
-    borderBottom: '1px solid #2a2a2a',
-    padding: '20px 32px',
-  },
-  title: {
-    margin: 0,
-    fontSize: 24,
-    fontWeight: 700,
-    color: '#fff',
-  },
-  subtitle: {
-    margin: '4px 0 0',
-    fontSize: 13,
-    color: '#888',
-  },
-  main: {
-    maxWidth: 820,
-    margin: '0 auto',
-    padding: '32px 24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 24,
-  },
-  error: {
-    background: '#2a1010',
-    border: '1px solid #5a1a1a',
-    color: '#ff7070',
-    borderRadius: 6,
-    padding: '12px 16px',
-    fontSize: 14,
-  },
-};

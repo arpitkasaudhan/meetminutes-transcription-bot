@@ -12,37 +12,52 @@ interface Props {
 export default function LiveTranscript({ chunks, sessionId, sessionDone }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const handleDownload = () => {
-    window.open(`${BACKEND_URL}/sessions/${sessionId}/transcript`, '_blank');
-  };
-
-  // Auto-scroll to the latest text
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chunks]);
 
+  const handleDownload = () => {
+    window.open(`${BACKEND_URL}/sessions/${sessionId}/transcript`, '_blank');
+  };
+
   return (
-    <div style={styles.card}>
-      <div style={styles.header}>
-        <span style={styles.title}>Live Transcript</span>
+    <div className="transcript-card">
+      <div className="transcript-header">
+        <div className="transcript-title">
+          {chunks.length > 0 && <span className="live-dot" />}
+          Live Transcript
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={styles.count}>{chunks.length} chunk{chunks.length !== 1 ? 's' : ''}</span>
+          <span className="transcript-count">
+            {chunks.length} {chunks.length === 1 ? 'chunk' : 'chunks'}
+          </span>
           {sessionDone && chunks.length > 0 && (
-            <button onClick={handleDownload} style={styles.dlBtn}>
-              Download .txt
+            <button className="dl-btn" onClick={handleDownload}>
+              ↓ Download
             </button>
           )}
         </div>
       </div>
 
-      <div style={styles.scroll}>
+      <div className="transcript-body">
         {chunks.length === 0 ? (
-          <p style={styles.empty}>Waiting for speech…</p>
+          <div className="transcript-empty">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" style={{ margin: '0 auto', display: 'block', opacity: 0.3 }}>
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z" fill="currentColor"/>
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="currentColor"/>
+            </svg>
+            <p>Waiting for speech…</p>
+            <p style={{ fontSize: 12, marginTop: 4, color: 'var(--text3)' }}>
+              Transcript will appear here as you speak
+            </p>
+          </div>
         ) : (
           chunks.map((chunk, i) => (
-            <div key={i} style={styles.chunk}>
-              <span style={styles.ts}>{new Date(chunk.timestamp).toLocaleTimeString()}</span>
-              <span style={styles.text}>{chunk.text}</span>
+            <div key={i} className="chunk">
+              <span className="chunk-time">
+                {new Date(chunk.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+              <span className="chunk-text">{chunk.text}</span>
             </div>
           ))
         )}
@@ -51,70 +66,3 @@ export default function LiveTranscript({ chunks, sessionId, sessionDone }: Props
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  card: {
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    borderRadius: 8,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '14px 20px',
-    borderBottom: '1px solid #2a2a2a',
-  },
-  title: {
-    fontSize: 14,
-    fontWeight: 600,
-    color: '#fff',
-  },
-  count: {
-    fontSize: 12,
-    color: '#555',
-  },
-  scroll: {
-    overflowY: 'auto',
-    maxHeight: 420,
-    padding: '16px 20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-  },
-  empty: {
-    color: '#444',
-    fontSize: 14,
-    margin: 0,
-    fontStyle: 'italic',
-  },
-  chunk: {
-    display: 'flex',
-    gap: 12,
-    alignItems: 'flex-start',
-    lineHeight: 1.5,
-  },
-  ts: {
-    fontSize: 11,
-    color: '#555',
-    fontFamily: 'monospace',
-    flexShrink: 0,
-    paddingTop: 2,
-  },
-  text: {
-    fontSize: 14,
-    color: '#e8e8e8',
-  },
-  dlBtn: {
-    background: '#1e3a6e',
-    color: '#93c5fd',
-    border: '1px solid #2563eb',
-    borderRadius: 5,
-    padding: '4px 10px',
-    fontSize: 12,
-    cursor: 'pointer',
-  },
-};

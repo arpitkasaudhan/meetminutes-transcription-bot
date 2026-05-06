@@ -3,111 +3,62 @@ import { Session, SessionStatus } from '../types';
 
 interface Props {
   session: Session;
+  onNewSession: () => void;
 }
 
-const STATUS_META: Record<SessionStatus, { label: string; color: string; dot: string }> = {
-  QUEUED:    { label: 'Queued',    color: '#a16207', dot: '#facc15' },
-  JOINING:   { label: 'Joining',   color: '#1d4ed8', dot: '#60a5fa' },
-  RECORDING: { label: 'Recording', color: '#166534', dot: '#4ade80' },
-  DONE:      { label: 'Done',      color: '#374151', dot: '#9ca3af' },
-  FAILED:    { label: 'Failed',    color: '#7f1d1d', dot: '#f87171' },
+const STATUS_CONFIG: Record<SessionStatus, { label: string; bg: string; dotColor: string; pulse: boolean }> = {
+  QUEUED:    { label: 'Queued',    bg: 'rgba(245,158,11,0.1)',  dotColor: '#f59e0b', pulse: false },
+  JOINING:   { label: 'Joining…',  bg: 'rgba(59,130,246,0.1)', dotColor: '#60a5fa', pulse: true  },
+  RECORDING: { label: 'Recording', bg: 'rgba(16,185,129,0.1)', dotColor: '#10b981', pulse: true  },
+  DONE:      { label: 'Done',      bg: 'rgba(75,85,99,0.15)',  dotColor: '#6b7280', pulse: false },
+  FAILED:    { label: 'Failed',    bg: 'rgba(239,68,68,0.1)',  dotColor: '#ef4444', pulse: false },
 };
 
-export default function SessionView({ session }: Props) {
-  const meta = STATUS_META[session.status];
+export default function SessionView({ session, onNewSession }: Props) {
+  const cfg = STATUS_CONFIG[session.status];
+  const isDone = session.status === 'DONE' || session.status === 'FAILED';
 
   return (
-    <div style={styles.card}>
-      <div style={styles.row}>
-        <span style={{ ...styles.badge, background: meta.color + '22', border: `1px solid ${meta.color}66` }}>
-          <span style={{ ...styles.dot, background: meta.dot, ...(session.status === 'RECORDING' ? styles.pulse : {}) }} />
-          {meta.label}
-        </span>
-        <span style={styles.sessionId}>Session {session.id.slice(0, 8)}…</span>
+    <div className="session-card">
+      <div className="session-top">
+        <div
+          className="status-badge"
+          style={{ background: cfg.bg, border: `1px solid ${cfg.dotColor}44` }}
+        >
+          <span
+            className={`status-dot${cfg.pulse ? ' pulse' : ''}`}
+            style={{ background: cfg.dotColor }}
+          />
+          <span style={{ color: cfg.dotColor }}>{cfg.label}</span>
+        </div>
+
+        {isDone && (
+          <button className="new-btn" onClick={onNewSession}>
+            + New Session
+          </button>
+        )}
       </div>
 
-      <div style={styles.details}>
-        <div style={styles.detail}>
-          <span style={styles.detailKey}>Meet URL</span>
-          <a href={session.meetUrl} target="_blank" rel="noopener noreferrer" style={styles.link}>
-            {session.meetUrl}
-          </a>
+      <div className="session-meta">
+        <div className="meta-item">
+          <span className="meta-label">Session ID</span>
+          <span className="meta-value" style={{ fontFamily: 'monospace', fontSize: 12 }}>
+            {session.id.slice(0, 8)}…
+          </span>
         </div>
-        <div style={styles.detail}>
-          <span style={styles.detailKey}>Bot Name</span>
-          <span style={styles.detailVal}>{session.botDisplayName}</span>
+        <div className="meta-item">
+          <span className="meta-label">Meet URL</span>
+          <span className="meta-value">
+            <a href={session.meetUrl} target="_blank" rel="noopener noreferrer">
+              {session.meetUrl.replace('https://meet.google.com/', '')}
+            </a>
+          </span>
         </div>
-        <div style={styles.detail}>
-          <span style={styles.detailKey}>Started</span>
-          <span style={styles.detailVal}>{new Date(session.createdAt).toLocaleTimeString()}</span>
+        <div className="meta-item">
+          <span className="meta-label">Bot name</span>
+          <span className="meta-value">{session.botDisplayName}</span>
         </div>
       </div>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  card: {
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    borderRadius: 8,
-    padding: '20px 24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 14,
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '5px 12px',
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#e8e8e8',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
-  pulse: {
-    animation: 'pulse 1.5s ease-in-out infinite',
-  },
-  sessionId: {
-    fontSize: 12,
-    color: '#555',
-    fontFamily: 'monospace',
-  },
-  details: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    borderTop: '1px solid #222',
-    paddingTop: 12,
-  },
-  detail: {
-    display: 'flex',
-    gap: 12,
-    fontSize: 13,
-  },
-  detailKey: {
-    color: '#666',
-    width: 80,
-    flexShrink: 0,
-  },
-  detailVal: {
-    color: '#ccc',
-  },
-  link: {
-    color: '#60a5fa',
-    textDecoration: 'none',
-    wordBreak: 'break-all',
-  },
-};
