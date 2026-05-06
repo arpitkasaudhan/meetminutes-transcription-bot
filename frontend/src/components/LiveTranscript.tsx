@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { TranscriptChunk } from '../types';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3000';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
 interface Props {
   chunks: TranscriptChunk[];

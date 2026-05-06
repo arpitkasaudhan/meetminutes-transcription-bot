@@ -6,7 +6,9 @@ import SessionView from './components/SessionView';
 import LiveTranscript from './components/LiveTranscript';
 import './styles.css';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3000';
+// In Docker (production): nginx proxies /sessions and /socket.io/ from the same origin
+// In local dev: use VITE_BACKEND_URL (defaults to localhost:3000)
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
