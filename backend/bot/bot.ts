@@ -157,19 +157,27 @@ async function startAudioCapture(page: Page, socket: Socket): Promise<void> {
 
     (async () => {
       try {
-        // Capture the real microphone — picks up the user's voice directly.
-        // The bot is muted in the meeting so this doesn't cause echo.
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            sampleRate: 16000,
-          },
+        // On the server (Docker + PulseAudio + Xvfb): getDisplayMedia captures
+        // all audio playing through PulseAudio — which includes the meeting audio.
+        // --auto-select-desktop-capture-source bypasses the dialog.
+        const stream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: { width: 1, height: 1, frameRate: 1 },
+          audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 16000 },
         });
-        console.log('[BotInPage] Microphone stream acquired');
+        stream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
+        console.log('[BotInPage] Display audio stream acquired');
         while (true) await captureOneChunk(stream);
-      } catch (err) {
-        console.error('[BotInPage] Microphone capture failed:', (err as Error).message);
+      } catch (e1) {
+        console.log('[BotInPage] getDisplayMedia failed, trying getUserMedia:', (e1 as Error).message);
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
+          });
+          console.log('[BotInPage] Microphone stream acquired');
+          while (true) await captureOneChunk(stream);
+        } catch (e2) {
+          console.error('[BotInPage] All audio capture failed:', (e2 as Error).message);
+        }
       }
     })();
   }, CHUNK_MS);
@@ -209,6 +217,9 @@ async function main() {
         '--disable-blink-features=AutomationControlled',
         '--autoplay-policy=no-user-gesture-required',
         '--use-fake-ui-for-media-stream',
+        '--use-fake-device-for-media-stream',
+        '--auto-select-desktop-capture-source=Entire screen',
+        '--enable-usermedia-screen-capturing',
       ],
     });
 
