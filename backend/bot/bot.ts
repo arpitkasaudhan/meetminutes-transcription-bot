@@ -157,27 +157,22 @@ async function startAudioCapture(page: Page, socket: Socket): Promise<void> {
 
     (async () => {
       try {
-        // On the server (Docker + PulseAudio + Xvfb): getDisplayMedia captures
-        // all audio playing through PulseAudio — which includes the meeting audio.
-        // --auto-select-desktop-capture-source bypasses the dialog.
-        const stream = await (navigator.mediaDevices as any).getDisplayMedia({
-          video: { width: 1, height: 1, frameRate: 1 },
-          audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 16000 },
+        // getUserMedia captures from PulseAudio's default source.
+        // entrypoint.sh sets the default source to loopback.monitor —
+        // a virtual sink that mirrors all Chrome audio output (meeting audio).
+        // This gives us a clean capture of exactly what plays in the meeting.
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            sampleRate: 16000,
+          },
         });
-        stream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
-        console.log('[BotInPage] Display audio stream acquired');
+        console.log('[BotInPage] Audio stream acquired via PulseAudio loopback');
         while (true) await captureOneChunk(stream);
-      } catch (e1) {
-        console.log('[BotInPage] getDisplayMedia failed, trying getUserMedia:', (e1 as Error).message);
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
-          });
-          console.log('[BotInPage] Microphone stream acquired');
-          while (true) await captureOneChunk(stream);
-        } catch (e2) {
-          console.error('[BotInPage] All audio capture failed:', (e2 as Error).message);
-        }
+      } catch (err) {
+        console.error('[BotInPage] Audio capture failed:', (err as Error).message);
       }
     })();
   }, CHUNK_MS);
