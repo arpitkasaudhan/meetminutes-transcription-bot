@@ -4,6 +4,6 @@
     "outDir": "./dist/bot",
     "rootDir": "./bot"
   },
-  "include": ["bot/**/*.ts"],
+  "include": ["bot/bot.ts"],
   "exclude": ["node_modules"]
 }
