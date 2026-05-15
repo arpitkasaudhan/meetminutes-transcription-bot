@@ -161,22 +161,30 @@ async function startAudioCapture(page: Page, socket: Socket): Promise<void> {
 
     (async () => {
       try {
-        // getUserMedia captures from PulseAudio's default source.
-        // entrypoint.sh sets the default source to loopback.monitor —
-        // a virtual sink that mirrors all Chrome audio output (meeting audio).
-        // This gives us a clean capture of exactly what plays in the meeting.
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            sampleRate: 16000,
-          },
+        // Strategy 1: getDisplayMedia — captures all audio playing in Chrome
+        // (meeting audio from all participants).
+        // --auto-select-desktop-capture-source bypasses the picker dialog.
+        const displayStream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: { width: 1, height: 1, frameRate: 1 },
+          audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 16000 },
         });
-        console.log('[BotInPage] Audio stream acquired via PulseAudio loopback');
-        while (true) await captureOneChunk(stream);
-      } catch (err) {
-        console.error('[BotInPage] Audio capture failed:', (err as Error).message);
+        displayStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
+        const audioTracks = displayStream.getAudioTracks();
+        if (audioTracks.length === 0) throw new Error('No audio track from getDisplayMedia');
+        console.log('[BotInPage] Display audio captured — hearing meeting audio');
+        while (true) await captureOneChunk(displayStream);
+      } catch (e1) {
+        console.log('[BotInPage] getDisplayMedia failed, trying microphone:', (e1 as Error).message);
+        try {
+          // Strategy 2: getUserMedia — captures the real microphone
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
+          });
+          console.log('[BotInPage] Microphone captured');
+          while (true) await captureOneChunk(micStream);
+        } catch (e2) {
+          console.error('[BotInPage] All audio capture failed:', (e2 as Error).message);
+        }
       }
     })();
   }, CHUNK_MS);
@@ -216,7 +224,6 @@ async function main() {
         '--disable-blink-features=AutomationControlled',
         '--autoplay-policy=no-user-gesture-required',
         '--use-fake-ui-for-media-stream',
-        '--use-fake-device-for-media-stream',
         '--auto-select-desktop-capture-source=Entire screen',
         '--enable-usermedia-screen-capturing',
       ],
