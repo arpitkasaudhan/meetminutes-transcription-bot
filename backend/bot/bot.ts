@@ -161,30 +161,22 @@ async function startAudioCapture(page: Page, socket: Socket): Promise<void> {
 
     (async () => {
       try {
-        // Strategy 1: getDisplayMedia — captures all audio playing in Chrome
-        // (meeting audio from all participants).
-        // --auto-select-desktop-capture-source bypasses the picker dialog.
-        const displayStream = await (navigator.mediaDevices as any).getDisplayMedia({
-          video: { width: 1, height: 1, frameRate: 1 },
-          audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 16000 },
+        // getUserMedia captures from the system's default audio input.
+        // On Linux/Docker: entrypoint.sh sets PulseAudio default source to
+        // loopback.monitor — this captures all Chrome audio output (meeting audio).
+        // On Windows local: captures the real microphone (user's voice).
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            sampleRate: 16000,
+          },
         });
-        displayStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
-        const audioTracks = displayStream.getAudioTracks();
-        if (audioTracks.length === 0) throw new Error('No audio track from getDisplayMedia');
-        console.log('[BotInPage] Display audio captured — hearing meeting audio');
-        while (true) await captureOneChunk(displayStream);
-      } catch (e1) {
-        console.log('[BotInPage] getDisplayMedia failed, trying microphone:', (e1 as Error).message);
-        try {
-          // Strategy 2: getUserMedia — captures the real microphone
-          const micStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
-          });
-          console.log('[BotInPage] Microphone captured');
-          while (true) await captureOneChunk(micStream);
-        } catch (e2) {
-          console.error('[BotInPage] All audio capture failed:', (e2 as Error).message);
-        }
+        console.log('[BotInPage] Audio stream acquired');
+        while (true) await captureOneChunk(stream);
+      } catch (err) {
+        console.error('[BotInPage] Audio capture failed:', (err as Error).message);
       }
     })();
   }, CHUNK_MS);
