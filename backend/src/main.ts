@@ -7,7 +7,24 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
+async function fixRedis() {
+  try {
+    const Redis = require('ioredis');
+    const client = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      maxRetriesPerRequest: 3,
+    });
+    await client.config('SET', 'stop-writes-on-bgsave-error', 'no');
+    await client.config('SET', 'save', '');
+    await client.quit();
+    console.log('Redis: disk-write errors disabled');
+  } catch {}
+}
+
 async function bootstrap() {
+  await fixRedis();
+
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({ origin: '*', credentials: true });
