@@ -4,10 +4,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --save '' --appendonly no
     ports:
       - '6379:6379'
-    volumes:
-      - redis_data:/data
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
@@ -45,5 +44,3 @@ services:
     environment:
       VITE_BACKEND_URL: http://localhost:3000
 
-volumes:
-  redis_data:
