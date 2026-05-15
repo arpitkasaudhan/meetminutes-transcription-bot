@@ -106,10 +106,14 @@ async function joinMeet(page: Page, displayName: string): Promise<void> {
 
           // Wait until inside the meeting (up to 2 min for host to admit)
           console.log('[Bot] Waiting to be admitted...');
-          await page.waitForSelector(
+          const admitted = await page.waitForSelector(
             '[data-meeting-title], [jsname="CQylAd"], [aria-label*="Leave call" i]',
             { timeout: 120_000 },
-          ).catch(() => console.log('[Bot] Admission timeout — proceeding anyway'));
+          ).then(() => true).catch(() => false);
+
+          if (!admitted) {
+            throw new Error('Admission timeout — host did not admit the bot within 2 minutes. Enable Quick Access on the meeting so the bot can join without waiting for approval.');
+          }
 
           console.log('[Bot] Successfully joined the meeting');
           return;
