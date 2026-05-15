@@ -31,6 +31,8 @@ export class BotProcessor extends WorkerHost {
           MEET_URL: meetUrl,
           BOT_DISPLAY_NAME: botDisplayName,
           BACKEND_WS_URL: backendWsUrl,
+          DISPLAY: process.env.DISPLAY || ':99',        // Xvfb display for headed Chrome
+          PULSE_SERVER: process.env.PULSE_SERVER || 'unix:/run/user/0/pulse/native',
         },
         stdio: 'pipe',
       });
